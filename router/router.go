@@ -2,37 +2,12 @@ package router
 
 import (
 	"log"
-	"net/http"
-	"time"
 
 	jwt "github.com/appleboy/gin-jwt/v2"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/strategodev/vuyo/router/middleware"
 )
-
-type login struct {
-	Username string `form:"username" json:"username" binding:"required"`
-	Password string `form:"password" json:"password" binding:"required"`
-}
-
-var identityKey = "id"
-
-func helloHandler(c *gin.Context) {
-	claims := jwt.ExtractClaims(c)
-	user, _ := c.Get(identityKey)
-	c.JSON(200, gin.H{
-		"userID":   claims[identityKey],
-		"userName": user.(*User).UserName,
-		"text":     "Hello World.",
-	})
-}
-
-// User demo
-type User struct {
-	UserName  string
-	FirstName string
-	LastName  string
-}
 
 // Configure configures the routing infrastructure for this daemon instance.
 func Configure() *gin.Engine {
@@ -47,82 +22,7 @@ func Configure() *gin.Engine {
 
 	router.Use(cors.New(config))
 
-	// the jwt middleware
-	authMiddleware, err := jwt.New(&jwt.GinJWTMiddleware{
-		Realm:       "test zone",
-		Key:         []byte("secret key"),
-		Timeout:     time.Hour,
-		MaxRefresh:  time.Hour,
-		IdentityKey: identityKey,
-		PayloadFunc: func(data interface{}) jwt.MapClaims {
-			if v, ok := data.(*User); ok {
-				return jwt.MapClaims{
-					identityKey: v.UserName,
-				}
-			}
-			return jwt.MapClaims{}
-		},
-		IdentityHandler: func(c *gin.Context) interface{} {
-			claims := jwt.ExtractClaims(c)
-			return &User{
-				UserName: claims[identityKey].(string),
-			}
-		},
-		Authenticator: func(c *gin.Context) (interface{}, error) {
-			var loginVals login
-			if err := c.ShouldBind(&loginVals); err != nil {
-				return "", jwt.ErrMissingLoginValues
-			}
-			userID := loginVals.Username
-			password := loginVals.Password
-
-			if (userID == "admin" && password == "admin") || (userID == "test" && password == "test") {
-				return &User{
-					UserName:  userID,
-					LastName:  "Bo-Yi",
-					FirstName: "Wu",
-				}, nil
-			}
-
-			return nil, jwt.ErrFailedAuthentication
-		},
-		Authorizator: func(data interface{}, c *gin.Context) bool {
-			if v, ok := data.(*User); ok && v.UserName == "admin" {
-				return true
-			}
-
-			return false
-		},
-		Unauthorized: func(c *gin.Context, code int, message string) {
-			c.JSON(code, gin.H{
-				"code":    code,
-				"message": message,
-			})
-		},
-
-		SendCookie:     true,
-		SecureCookie:   true, // non HTTPS dev environments
-		CookieHTTPOnly: true, // JS can't modify
-		CookieDomain:   "localhost:8080",
-		CookieName:     "token", // default jwt
-		TokenLookup:    "cookie:token",
-		CookieSameSite: http.SameSiteNoneMode, //SameSiteDefaultMode, SameSiteLaxMode, SameSiteStrictMode, SameSiteNoneMode
-
-		// TimeFunc provides the current time. You can override it to use another time value. This is useful for testing or if your server uses a different time zone than your tokens.
-		TimeFunc: time.Now,
-	})
-
-	if err != nil {
-		log.Fatal("JWT Error:" + err.Error())
-	}
-
-	// When you use jwt.New(), the function is already automatically called for checking,
-	// which means you don't need to call it again.
-	errInit := authMiddleware.MiddlewareInit()
-
-	if errInit != nil {
-		log.Fatal("authMiddleware.MiddlewareInit() Error:" + errInit.Error())
-	}
+	authMiddleware := middleware.AuthMiddleware()
 
 	router.POST("/login", authMiddleware.LoginHandler)
 
@@ -133,11 +33,75 @@ func Configure() *gin.Engine {
 	})
 
 	auth := router.Group("/auth")
-	// Refresh time can be longer than token timeout
-	auth.GET("/refresh_token", authMiddleware.RefreshHandler)
 	auth.Use(authMiddleware.MiddlewareFunc())
 	{
-		auth.GET("/hello", helloHandler)
+		auth.GET("/hello", middleware.HelloHandler)
+	}
+
+	// This route is special it sits above all the other requests because we are
+	// using a JWT to authorize access to it, therefore it needs to be publicly
+	// accessible.
+	// router.GET("/api/servers/:server/ws", middleware.ServerExists(), getServerWebsocket)
+
+	// This request is called by another daemon when a server is going to be transferred out.
+	// This request does not need the AuthorizationMiddleware as the panel should never call it
+	// and requests are authenticated through a JWT the panel issues to the other daemon.
+	// router.POST("/api/transfers", postTransfers)
+
+	// All the routes beyond this mount will use an authorization middleware
+	// and will not be accessible without the correct Authorization header provided.
+	protected := router.Use(middleware.RequireAuthorization())
+	// protected.POST("/api/update", postUpdateConfiguration)
+	// protected.GET("/api/system", getSystemInformation)
+	protected.GET("/api/servers", getAllServers)
+	protected.POST("/api/servers", postCreateServer)
+	// protected.DELETE("/api/transfers/:server", deleteTransfer)
+
+	// These are server specific routes, and require that the request be authorized, and
+	// that the server exist on the Daemon.
+	server := router.Group("/api/servers/:server")
+	server.Use(middleware.RequireAuthorization(), middleware.ServerExists())
+	{
+		server.GET("", getServer)
+		server.DELETE("", deleteServer)
+
+		server.GET("/logs", getServerLogs)
+		// server.POST("/power", postServerPower)
+		// server.POST("/commands", postServerCommands)
+		// server.POST("/install", postServerInstall)
+		// server.POST("/reinstall", postServerReinstall)
+		// server.POST("/sync", postServerSync)
+		// server.POST("/ws/deny", postServerDenyWSTokens)
+
+		// This archive request causes the archive to start being created
+		// this should only be triggered by the panel.
+		// server.POST("/transfer", postServerTransfer)
+		// server.DELETE("/transfer", deleteServerTransfer)
+
+		// files := server.Group("/files")
+		// {
+		// 	files.GET("/contents", getServerFileContents)
+		// 	files.GET("/list-directory", getServerListDirectory)
+		// 	files.PUT("/rename", putServerRenameFiles)
+		// 	files.POST("/copy", postServerCopyFile)
+		// 	files.POST("/write", postServerWriteFile)
+		// 	files.POST("/create-directory", postServerCreateDirectory)
+		// 	files.POST("/delete", postServerDeleteFiles)
+		// 	files.POST("/compress", postServerCompressFiles)
+		// 	files.POST("/decompress", postServerDecompressFiles)
+		// 	files.POST("/chmod", postServerChmodFile)
+
+		// 	files.GET("/pull", middleware.RemoteDownloadEnabled(), getServerPullingFiles)
+		// 	files.POST("/pull", middleware.RemoteDownloadEnabled(), postServerPullRemoteFile)
+		// 	files.DELETE("/pull/:download", middleware.RemoteDownloadEnabled(), deleteServerPullRemoteFile)
+		// }
+
+		// backup := server.Group("/backup")
+		// {
+		// 	backup.POST("", postServerBackup)
+		// 	backup.POST("/:backup/restore", postServerRestoreBackup)
+		// 	backup.DELETE("/:backup", deleteServerBackup)
+		// }
 	}
 
 	return router
