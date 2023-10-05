@@ -18,7 +18,7 @@ func Configure() *gin.Engine {
 
 	config := cors.DefaultConfig()
 	config.AllowCredentials = true
-	config.AllowOrigins = []string{"https://strategovuyo-2dft--3000--33975f1d.local-credentialless.webcontainer.io"}
+	config.AllowOrigins = []string{"http://localhost:3000"}
 
 	router.Use(cors.New(config))
 
@@ -50,17 +50,17 @@ func Configure() *gin.Engine {
 
 	// All the routes beyond this mount will use an authorization middleware
 	// and will not be accessible without the correct Authorization header provided.
-	protected := router.Use(middleware.RequireAuthorization())
+	// protected := router.Use(middleware.RequireAuthorization())
 	// protected.POST("/api/update", postUpdateConfiguration)
 	// protected.GET("/api/system", getSystemInformation)
-	protected.GET("/api/servers", getAllServers)
-	protected.POST("/api/servers", postCreateServer)
+	// protected.GET("/api/servers", getAllServers)
+	// protected.POST("/api/servers", postCreateServer)
 	// protected.DELETE("/api/transfers/:server", deleteTransfer)
 
 	// These are server specific routes, and require that the request be authorized, and
 	// that the server exist on the Daemon.
 	server := router.Group("/api/servers/:server")
-	server.Use(middleware.RequireAuthorization(), middleware.ServerExists())
+	// server.Use(middleware.RequireAuthorization(), middleware.ServerExists())
 	{
 		server.GET("", getServer)
 		server.DELETE("", deleteServer)

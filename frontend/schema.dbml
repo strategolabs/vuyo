@@ -1,0 +1,34 @@
+Enum "users_role_enum" {
+  "root_admin"
+  "admin"
+  "user"
+  "subuser"
+}
+
+Table "users" {
+  "id" INT [pk, increment]
+  "username" VARCHAR(255) [unique, not null]
+  "email" VARCHAR(255) [unique, not null]
+  "password" VARCHAR(255) [not null]
+  "role" users_role_enum [not null, default: "user"]
+  "permissions" TEXT [not null]
+  "use_totp" TINYINT(3) [not null]
+  "totp_secret" TEXT [default: NULL]
+  "totp_authenticated_at" TIMESTAMP [default: NULL]
+  "created_at" TIMESTAMP [default: NULL]
+  "updated_at" TIMESTAMP [default: NULL]
+
+Indexes {
+  role [unique, name: "unique_root_admin"]
+}
+}
+
+Table "activity_log" {
+  "id" INT [pk, increment]
+  "event" VARCHAR(255) [not null]
+  "ip" VARCHAR(45) [not null]
+  "description" TEXT
+  "actor_type" varchar(191) [default: NULL]
+  "actor_id" bigint(20) [default: NULL]
+  "timestamp" TIMESTAMP [default: `CURRENT_TIMESTAMP`]
+}

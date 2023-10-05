@@ -1,16 +1,13 @@
 package middleware
 
 import (
-	"crypto/subtle"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/apex/log"
 
 	jwt "github.com/appleboy/gin-jwt/v2"
 	"github.com/gin-gonic/gin"
-	"github.com/pterodactyl/wings/config"
 	"github.com/pterodactyl/wings/server"
 )
 
@@ -146,29 +143,6 @@ func ServerExists() gin.HandlerFunc {
 // permission string, ensuring that if it is a server permission, the token has
 // control over that server. If it is a global token, this will ensure that the
 // request is using a properly signed global token.
-func RequireAuthorization() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		// We don't put this value outside this function since the node's authentication
-		// token can be changed on the fly and the config.Get() call returns a copy, so
-		// if it is rotated this value will never properly get updated.
-		token := config.Get().AuthenticationToken
-		auth := strings.SplitN(c.GetHeader("Authorization"), " ", 2)
-		if len(auth) != 2 || auth[0] != "Bearer" {
-			c.Header("WWW-Authenticate", "Bearer")
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "The required authorization heads were not present in the request."})
-			return
-		}
-
-		// All requests to Wings must be authorized with the authentication token present in
-		// the Wings configuration file. Remeber, all requests to Wings come from the Panel
-		// backend, or using a signed JWT for temporary authentication.
-		if subtle.ConstantTimeCompare([]byte(auth[1]), []byte(token)) != 1 {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "You are not authorized to access this endpoint."})
-			return
-		}
-		c.Next()
-	}
-}
 
 // ExtractLogger pulls the logger out of the request context and returns it. By
 // default this will include the request ID, but may also include the server ID
